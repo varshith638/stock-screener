@@ -238,16 +238,23 @@ def get_sp500_tickers() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=3600)
-def fetch_data(tickers: tuple, period: str = "1y") -> pd.DataFrame:
+def fetch_data(tickers: tuple, period: str = "2y") -> pd.DataFrame:
+    # auto_adjust=False → actual (unadjusted) OHLCV prices, matching TradingView.
+    # SuperTrend is path-dependent: historical ATR values affect current bands.
+    # Note: indicator values may still diverge from TradingView for stocks with
+    # major corporate actions (spinoffs, reverse splits) if TradingView's data
+    # for the volatile event period differs from yfinance's data.
     return yf.download(
         list(tickers), period=period, group_by="ticker",
-        auto_adjust=True, progress=False, threads=True,
+        auto_adjust=False, progress=False, threads=True,
     )
 
 
 def _ticker_df(data: pd.DataFrame, ticker: str) -> pd.DataFrame | None:
     try:
         df = data[ticker].dropna(how="all")
+        # Drop Adj Close column if present (auto_adjust=False includes it)
+        df = df.drop(columns=[c for c in df.columns if "Adj" in str(c)], errors="ignore")
         return df if len(df) > 60 else None
     except (KeyError, TypeError):
         return None
