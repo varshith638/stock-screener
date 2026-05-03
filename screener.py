@@ -143,48 +143,69 @@ def _eval_condition(df: pd.DataFrame, cond: dict) -> tuple[bool, bool] | None:
     return passes_today, passes_yest
 
 
-def inspect_ticker(data: pd.DataFrame, ticker: str, conditions: list[dict]) -> list[dict]:
-    """Return a per-condition breakdown for a single ticker with actual values."""
+def inspect_ticker(data: pd.DataFrame, ticker: str, conditions: list[dict], lookback: int = 5) -> tuple[list[dict], pd.DataFrame]:
+    """
+    Return:
+      - per-condition summary rows (today's values + pass/fail)
+      - a history DataFrame showing the last `lookback` days for each condition
+    """
     df = _ticker_df(data, ticker)
     if df is None:
-        return []
+        return [], pd.DataFrame()
 
-    rows = []
+    summary_rows = []
+    history_cols: dict[str, pd.Series] = {"Date": df.index[-lookback:]}
+
     for cond in conditions:
+        label   = _cond_label(cond)
         field_s = df[cond["field"]]
         ind_s   = _indicator_series(df, cond["indicator"], cond["params"])
 
         if ind_s is None:
-            rows.append({
-                "Condition": _cond_label(cond),
-                "Field value": "—",
-                "Indicator value": "insufficient data",
-                "Passes": "⚠️ skip",
-            })
+            summary_rows.append({"Condition": label, "Field (today)": "—",
+                                  "Indicator (today)": "no data", "Passes": "⚠️ skip"})
             continue
 
         combined = pd.DataFrame({"field": field_s, "ind": ind_s}).dropna()
         if len(combined) < 2:
-            rows.append({
-                "Condition": _cond_label(cond),
-                "Field value": "—",
-                "Indicator value": "insufficient data",
-                "Passes": "⚠️ skip",
-            })
+            summary_rows.append({"Condition": label, "Field (today)": "—",
+                                  "Indicator (today)": "no data", "Passes": "⚠️ skip"})
             continue
 
         f_today, f_prev = combined["field"].iloc[-1], combined["field"].iloc[-2]
         i_today, i_prev = combined["ind"].iloc[-1],   combined["ind"].iloc[-2]
         passes = _compare(f_today, cond["operator"], i_today, f_prev, i_prev)
 
-        rows.append({
-            "Condition": _cond_label(cond),
-            "Field value": round(float(f_today), 4),
-            "Indicator value": round(float(i_today), 4),
-            "Passes": "✅ Yes" if passes else "❌ No",
+        summary_rows.append({
+            "Condition":         label,
+            "Field (today)":     round(float(f_today), 4),
+            "Indicator (today)": round(float(i_today), 4),
+            "Passes":            "✅ Yes" if passes else "❌ No",
         })
 
-    return rows
+        # Build history for last N days
+        hist = combined.tail(lookback)
+        short_label = label[:30] + "…" if len(label) > 30 else label
+        history_cols[f"{short_label} | field"] = hist["field"].round(4).values
+        history_cols[f"{short_label} | ind"]   = hist["ind"].round(4).values
+        history_cols[f"{short_label} | pass"]  = [
+            "✅" if _compare(
+                float(hist["field"].iloc[i]),
+                cond["operator"],
+                float(hist["ind"].iloc[i]),
+                float(hist["field"].iloc[i-1]) if i > 0 else float(hist["field"].iloc[i]),
+                float(hist["ind"].iloc[i-1])   if i > 0 else float(hist["ind"].iloc[i]),
+            ) else "❌"
+            for i in range(len(hist))
+        ]
+
+    try:
+        history_df = pd.DataFrame(history_cols)
+        history_df["Date"] = pd.to_datetime(history_df["Date"]).dt.strftime("%b %d")
+    except Exception:
+        history_df = pd.DataFrame()
+
+    return summary_rows, history_df
 
 
 def _cond_label(cond: dict) -> str:

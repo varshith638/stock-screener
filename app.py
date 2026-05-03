@@ -230,29 +230,6 @@ if "results" in st.session_state:
         display["New entry"] = display["New entry"].map({True: "🆕 Yes", False: ""})
         st.dataframe(_style(display), use_container_width=True, hide_index=True)
 
-        # ── Stock inspector ───────────────────────────────────────────────
-        st.subheader("Inspect a stock")
-        ticker_list = results["Ticker"].tolist()
-        selected = st.selectbox("Pick a ticker to see how it passes each condition",
-                                ticker_list, key="inspect_ticker")
-        if selected:
-            breakdown = inspect_ticker(
-                st.session_state.get("_cached_data"),
-                selected,
-                st.session_state.conditions,
-            )
-            if breakdown:
-                breakdown_df = pd.DataFrame(breakdown)
-                def _style_passes(val):
-                    if "✅" in str(val): return "color: green; font-weight: bold"
-                    if "❌" in str(val): return "color: red; font-weight: bold"
-                    if "⚠️" in str(val): return "color: orange"
-                    return ""
-                st.dataframe(
-                    breakdown_df.style.map(_style_passes, subset=["Passes"]),
-                    use_container_width=True, hide_index=True,
-                )
-
         col_csv, col_sms = st.columns(2)
         col_csv.download_button(
             "⬇ Download CSV", results.to_csv(index=False),
@@ -280,6 +257,47 @@ if "results" in st.session_state:
                     st.success(f"SMS sent! Message SID: `{sid}`")
                 except Exception as e:
                     st.error(f"SMS failed: {e}")
+# ── Stock inspector (available any time data is loaded) ───────────────────────
+if st.session_state.get("_cached_data") is not None:
+    st.divider()
+    st.subheader("🔍 Stock Inspector")
+    st.caption("Type any S&P 500 ticker to see exactly how it evaluates against every active condition.")
+
+    col_t, col_lb = st.columns([2, 1])
+    inspect_input = col_t.text_input("Ticker", placeholder="e.g. AIG", key="inspect_input").upper().strip()
+    lookback      = col_lb.number_input("Days of history", min_value=3, max_value=20, value=5, step=1, key="inspect_lb")
+
+    if inspect_input:
+        summary, history = inspect_ticker(
+            st.session_state["_cached_data"],
+            inspect_input,
+            st.session_state.conditions,
+            lookback=int(lookback),
+        )
+        if not summary:
+            st.warning(f"No data found for **{inspect_input}** — check the ticker symbol.")
+        else:
+            def _style_passes(val):
+                if "✅" in str(val): return "color: green; font-weight: bold"
+                if "❌" in str(val): return "color: red; font-weight: bold"
+                if "⚠️"  in str(val): return "color: orange"
+                return ""
+
+            st.markdown(f"**Today's evaluation for {inspect_input}**")
+            summary_df = pd.DataFrame(summary)
+            st.dataframe(
+                summary_df.style.map(_style_passes, subset=["Passes"]),
+                use_container_width=True, hide_index=True,
+            )
+
+            if not history.empty:
+                st.markdown(f"**Last {lookback} trading days** — cross-check these values against TradingView")
+                pass_cols = [c for c in history.columns if "| pass" in c]
+                st.dataframe(
+                    history.style.map(_style_passes, subset=pass_cols),
+                    use_container_width=True, hide_index=True,
+                )
+
 else:
     st.info("Add conditions above and click **Run Screener** in the sidebar.")
     with st.expander("How it works"):
