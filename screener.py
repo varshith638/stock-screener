@@ -270,34 +270,42 @@ def run_screener(
         if df is None:
             continue
 
-        today_results, yest_results = [], []
-        skip = False
+        # Evaluate every condition — ALL must pass (strict AND).
+        # We collect yesterday's results only for "new entry" detection.
+        passed_all_today = True
+        yest_results: list[bool] = []
+        insufficient_data = False
+
         for cond in conditions:
             out = _eval_condition(df, cond)
-            if out is None:
-                skip = True
+
+            if out is None:                   # can't compute this indicator
+                insufficient_data = True
                 break
-            today_results.append(out[0])
-            yest_results.append(out[1])
 
-        if skip:
+            passes_today, passes_yest = out
+
+            if not passes_today:              # this condition fails → reject immediately
+                passed_all_today = False
+                break
+
+            yest_results.append(passes_yest)  # only collected when today passes
+
+        if insufficient_data or not passed_all_today:
             continue
 
-        passes_today = all(today_results)
-        if not passes_today:
-            continue
-
-        passes_yest = all(yest_results)
+        # Reach here only when EVERY condition passed today
+        new_entry = not all(yest_results)     # at least one failed yesterday → new signal
         close_today = float(df["Close"].iloc[-1])
         close_yest  = float(df["Close"].iloc[-2])
         pct = (close_today - close_yest) / close_yest * 100
 
         results.append({
-            "Ticker":   ticker,
-            "Company":  row["name"],
-            "Price":    round(close_today, 2),
-            "Change %": round(pct, 2),
-            "New entry": not passes_yest,
+            "Ticker":    ticker,
+            "Company":   row["name"],
+            "Price":     round(close_today, 2),
+            "Change %":  round(pct, 2),
+            "New entry": new_entry,
         })
 
     return pd.DataFrame(results)
