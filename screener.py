@@ -143,6 +143,64 @@ def _eval_condition(df: pd.DataFrame, cond: dict) -> tuple[bool, bool] | None:
     return passes_today, passes_yest
 
 
+def inspect_ticker(data: pd.DataFrame, ticker: str, conditions: list[dict]) -> list[dict]:
+    """Return a per-condition breakdown for a single ticker with actual values."""
+    df = _ticker_df(data, ticker)
+    if df is None:
+        return []
+
+    rows = []
+    for cond in conditions:
+        field_s = df[cond["field"]]
+        ind_s   = _indicator_series(df, cond["indicator"], cond["params"])
+
+        if ind_s is None:
+            rows.append({
+                "Condition": _cond_label(cond),
+                "Field value": "—",
+                "Indicator value": "insufficient data",
+                "Passes": "⚠️ skip",
+            })
+            continue
+
+        combined = pd.DataFrame({"field": field_s, "ind": ind_s}).dropna()
+        if len(combined) < 2:
+            rows.append({
+                "Condition": _cond_label(cond),
+                "Field value": "—",
+                "Indicator value": "insufficient data",
+                "Passes": "⚠️ skip",
+            })
+            continue
+
+        f_today, f_prev = combined["field"].iloc[-1], combined["field"].iloc[-2]
+        i_today, i_prev = combined["ind"].iloc[-1],   combined["ind"].iloc[-2]
+        passes = _compare(f_today, cond["operator"], i_today, f_prev, i_prev)
+
+        rows.append({
+            "Condition": _cond_label(cond),
+            "Field value": round(float(f_today), 4),
+            "Indicator value": round(float(i_today), 4),
+            "Passes": "✅ Yes" if passes else "❌ No",
+        })
+
+    return rows
+
+
+def _cond_label(cond: dict) -> str:
+    p = cond["params"]
+    ind = cond["indicator"]
+    if ind == "SuperTrend":
+        ind_str = f"SuperTrend({p.get('length')}, {p.get('multiplier')})"
+    elif ind in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom"):
+        ind_str = f"{ind}({p.get('tenkan')}, {p.get('kijun')}, {p.get('senkou_b')})"
+    elif ind in ("EMA", "SMA"):
+        ind_str = f"{ind}({p.get('source')}, {p.get('period')})"
+    else:
+        ind_str = f"Number({p.get('value')})"
+    return f"{cond['field']} {cond['operator']} {ind_str}"
+
+
 # ── Data fetching ──────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600)

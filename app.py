@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 from screener import (
     FIELDS, OPERATORS, INDICATORS, DEFAULT_PARAMS,
-    new_condition, get_sp500_tickers, fetch_data, run_screener,
+    new_condition, get_sp500_tickers, fetch_data, run_screener, inspect_ticker,
 )
 from sms import send_sms
 
@@ -196,6 +196,7 @@ if run_btn:
 
     st.session_state["results"] = results
     st.session_state["total_screened"] = len(tickers)
+    st.session_state["_cached_data"] = data
 
 if "results" in st.session_state:
     results: pd.DataFrame = st.session_state["results"]
@@ -228,6 +229,29 @@ if "results" in st.session_state:
         display = results.copy()
         display["New entry"] = display["New entry"].map({True: "🆕 Yes", False: ""})
         st.dataframe(_style(display), use_container_width=True, hide_index=True)
+
+        # ── Stock inspector ───────────────────────────────────────────────
+        st.subheader("Inspect a stock")
+        ticker_list = results["Ticker"].tolist()
+        selected = st.selectbox("Pick a ticker to see how it passes each condition",
+                                ticker_list, key="inspect_ticker")
+        if selected:
+            breakdown = inspect_ticker(
+                st.session_state.get("_cached_data"),
+                selected,
+                st.session_state.conditions,
+            )
+            if breakdown:
+                breakdown_df = pd.DataFrame(breakdown)
+                def _style_passes(val):
+                    if "✅" in str(val): return "color: green; font-weight: bold"
+                    if "❌" in str(val): return "color: red; font-weight: bold"
+                    if "⚠️" in str(val): return "color: orange"
+                    return ""
+                st.dataframe(
+                    breakdown_df.style.map(_style_passes, subset=["Passes"]),
+                    use_container_width=True, hide_index=True,
+                )
 
         col_csv, col_sms = st.columns(2)
         col_csv.download_button(
