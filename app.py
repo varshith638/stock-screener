@@ -13,21 +13,38 @@ st.set_page_config(page_title="Stock Screener", page_icon="📈", layout="wide")
 
 # ── Presets ───────────────────────────────────────────────────────────────────
 PRESETS: dict[str, list[dict]] = {
-    "Strong Bull (TV Standard)": [
-        {"field": "Close",  "operator": "Greater than", "indicator": "SuperTrend",
-         "params": {"length": 12, "multiplier": 3.0}},
-        {"field": "Close",  "operator": "Greater than", "indicator": "SuperTrend",
-         "params": {"length": 10, "multiplier": 1.0}},
-        {"field": "Close",  "operator": "Greater than", "indicator": "SuperTrend",
-         "params": {"length": 11, "multiplier": 2.0}},
-        {"field": "Close",  "operator": "Greater than", "indicator": "Ichimoku Cloud Top",
-         "params": {"tenkan": 9, "kijun": 26, "senkou_b": 52}},
-        {"field": "Close",  "operator": "Greater than", "indicator": "Ichimoku Cloud Top",
-         "params": {"tenkan": 9, "kijun": 26, "senkou_b": 52}},
-        {"field": "Close",  "operator": "Greater than", "indicator": "EMA",
+    # ── BUY preset ──────────────────────────────────────────────────────────────
+    # Mirrors the Pine Script exactly:
+    #   ta.supertrend(factor, atrLength) → factor is multiplier, atrLength is length
+    #   leadingSpanA / leadingSpanB are unshifted (Ichimoku Span A / B)
+    "🟢 Strong Bull (BUY signals)": [
+        {"field": "Close", "operator": "Greater than", "indicator": "SuperTrend",
+         "params": {"length": 3,  "multiplier": 12.0}},   # ta.supertrend(12, 3)
+        {"field": "Close", "operator": "Greater than", "indicator": "SuperTrend",
+         "params": {"length": 1,  "multiplier": 10.0}},   # ta.supertrend(10, 1)
+        {"field": "Close", "operator": "Greater than", "indicator": "SuperTrend",
+         "params": {"length": 2,  "multiplier": 11.0}},   # ta.supertrend(11, 2)
+        {"field": "Close", "operator": "Greater than", "indicator": "Ichimoku Span A",
+         "params": {"tenkan": 9, "kijun": 26, "senkou_b": 52}},  # close > leadingSpanA
+        {"field": "Close", "operator": "Greater than", "indicator": "Ichimoku Span B",
+         "params": {"tenkan": 9, "kijun": 26, "senkou_b": 52}},  # close > leadingSpanB
+        {"field": "Close", "operator": "Greater than", "indicator": "EMA",
          "params": {"source": "Close", "period": 200}},
-        {"field": "Volume", "operator": "Greater than", "indicator": "Number",
-         "params": {"value": 20.0}},
+    ],
+    # ── SELL preset ─────────────────────────────────────────────────────────────
+    "🔴 Strong Bear (SELL signals)": [
+        {"field": "Close", "operator": "Less than", "indicator": "SuperTrend",
+         "params": {"length": 3,  "multiplier": 12.0}},
+        {"field": "Close", "operator": "Less than", "indicator": "SuperTrend",
+         "params": {"length": 1,  "multiplier": 10.0}},
+        {"field": "Close", "operator": "Less than", "indicator": "SuperTrend",
+         "params": {"length": 2,  "multiplier": 11.0}},
+        {"field": "Close", "operator": "Less than", "indicator": "Ichimoku Span A",
+         "params": {"tenkan": 9, "kijun": 26, "senkou_b": 52}},
+        {"field": "Close", "operator": "Less than", "indicator": "Ichimoku Span B",
+         "params": {"tenkan": 9, "kijun": 26, "senkou_b": 52}},
+        {"field": "Close", "operator": "Less than", "indicator": "EMA",
+         "params": {"source": "Close", "period": 200}},
     ],
 }
 
@@ -39,15 +56,16 @@ if "conditions" not in st.session_state:
 def _init_widget_state(cid: str, ind: str, params: dict) -> None:
     """Pre-populate st.session_state keys for a condition's param widgets
     so Streamlit never falls back to a stale default value."""
+    _ichi_keys = {f"ten_{cid}": params.get("tenkan", 9),
+                   f"kij_{cid}": params.get("kijun", 26),
+                   f"sen_{cid}": params.get("senkou_b", 52)}
     keys = {
         "SuperTrend":            {f"len_{cid}": params.get("length", 7),
                                    f"mul_{cid}": params.get("multiplier", 3.0)},
-        "Ichimoku Cloud Top":    {f"ten_{cid}": params.get("tenkan", 9),
-                                   f"kij_{cid}": params.get("kijun", 26),
-                                   f"sen_{cid}": params.get("senkou_b", 52)},
-        "Ichimoku Cloud Bottom": {f"ten_{cid}": params.get("tenkan", 9),
-                                   f"kij_{cid}": params.get("kijun", 26),
-                                   f"sen_{cid}": params.get("senkou_b", 52)},
+        "Ichimoku Cloud Top":    _ichi_keys,
+        "Ichimoku Cloud Bottom": _ichi_keys,
+        "Ichimoku Span A":       _ichi_keys,
+        "Ichimoku Span B":       _ichi_keys,
         "EMA":                   {f"src_{cid}": params.get("source", "Close"),
                                    f"per_{cid}": params.get("period", 200)},
         "SMA":                   {f"src_{cid}": params.get("source", "Close"),
@@ -64,7 +82,7 @@ def _read_params_from_state(cid: str, ind: str) -> dict:
     if ind == "SuperTrend":
         return {"length": st.session_state.get(f"len_{cid}", 7),
                 "multiplier": st.session_state.get(f"mul_{cid}", 3.0)}
-    if ind in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom"):
+    if ind in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom", "Ichimoku Span A", "Ichimoku Span B"):
         return {"tenkan": st.session_state.get(f"ten_{cid}", 9),
                 "kijun":  st.session_state.get(f"kij_{cid}", 26),
                 "senkou_b": st.session_state.get(f"sen_{cid}", 52)}
@@ -127,12 +145,18 @@ if _preset_btn_col.button("Load preset", use_container_width=True):
         st.rerun()
 
 # Show post-load notice (rendered on the rerun that follows)
-if st.session_state.pop("_preset_loaded", None) == "Strong Bull (TV Standard)":
-    st.info(
-        "⚠️ **Note on Volume > 20:** yfinance reports volume in actual shares "
-        "(S&P 500 stocks typically trade millions of shares daily), so this "
-        "condition will always pass. To filter low-volume stocks use a value "
-        "like **500000** (500 k shares) instead."
+_loaded = st.session_state.pop("_preset_loaded", None)
+if _loaded == "🟢 Strong Bull (BUY signals)":
+    st.success(
+        "✅ Loaded 6 BUY conditions from your Pine Script — "
+        "SuperTrend(12,3), SuperTrend(10,1), SuperTrend(11,2), "
+        "Ichimoku Span A, Ichimoku Span B, EMA(200). "
+        "**New entries** (highlighted yellow) = BUY signal fired today."
+    )
+elif _loaded == "🔴 Strong Bear (SELL signals)":
+    st.warning(
+        "🔴 Loaded 6 SELL conditions — same indicators with **Less than** operator. "
+        "**New entries** = SELL signal fired today."
     )
 
 conditions = st.session_state.conditions
@@ -176,7 +200,7 @@ for idx, cond in enumerate(conditions):
             pa.number_input("Length",     min_value=1,   step=1,   key=f"len_{cid}", label_visibility="collapsed")
             pb.number_input("Multiplier", min_value=0.1, step=0.5, key=f"mul_{cid}", label_visibility="collapsed")
 
-        elif ind in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom"):
+        elif ind in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom", "Ichimoku Span A", "Ichimoku Span B"):
             pa, pb, pc = st.columns(3)
             pa.number_input("Tenkan",   min_value=1, step=1, key=f"ten_{cid}", label_visibility="collapsed")
             pb.number_input("Kijun",    min_value=1, step=1, key=f"kij_{cid}", label_visibility="collapsed")
@@ -213,8 +237,9 @@ with st.expander("Active conditions being evaluated", expanded=False):
     for i, cond in enumerate(st.session_state.conditions, 1):
         p = cond["params"]
         if cond["indicator"] == "SuperTrend":
-            ind_str = f"SuperTrend({p.get('length')}, {p.get('multiplier')})"
-        elif cond["indicator"] in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom"):
+            ind_str = f"SuperTrend({p.get('multiplier')}, {p.get('length')})"   # (factor, atrLen)
+        elif cond["indicator"] in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom",
+                                    "Ichimoku Span A", "Ichimoku Span B"):
             ind_str = f"{cond['indicator']}({p.get('tenkan')}, {p.get('kijun')}, {p.get('senkou_b')})"
         elif cond["indicator"] in ("EMA", "SMA"):
             ind_str = f"{cond['indicator']}({p.get('source')}, {p.get('period')})"

@@ -12,17 +12,21 @@ INDICATORS = [
     "SuperTrend",
     "Ichimoku Cloud Top",
     "Ichimoku Cloud Bottom",
+    "Ichimoku Span A",       # unshifted leadingSpanA  = (tenkan + kijun) / 2
+    "Ichimoku Span B",       # unshifted leadingSpanB  = (highest + lowest) / 2 over senkou_b
     "EMA",
     "SMA",
     "Number",
 ]
 DEFAULT_PARAMS: dict[str, dict] = {
-    "SuperTrend":           {"length": 7,  "multiplier": 3.0},
-    "Ichimoku Cloud Top":   {"tenkan": 9,  "kijun": 26, "senkou_b": 52},
-    "Ichimoku Cloud Bottom":{"tenkan": 9,  "kijun": 26, "senkou_b": 52},
-    "EMA":                  {"source": "Close", "period": 200},
-    "SMA":                  {"source": "Close", "period": 200},
-    "Number":               {"value": 0.0},
+    "SuperTrend":            {"length": 7,  "multiplier": 3.0},
+    "Ichimoku Cloud Top":    {"tenkan": 9,  "kijun": 26, "senkou_b": 52},
+    "Ichimoku Cloud Bottom": {"tenkan": 9,  "kijun": 26, "senkou_b": 52},
+    "Ichimoku Span A":       {"tenkan": 9,  "kijun": 26, "senkou_b": 52},
+    "Ichimoku Span B":       {"tenkan": 9,  "kijun": 26, "senkou_b": 52},
+    "EMA":                   {"source": "Close", "period": 200},
+    "SMA":                   {"source": "Close", "period": 200},
+    "Number":                {"value": 0.0},
 }
 
 
@@ -77,6 +81,7 @@ def _supertrend_line(df: pd.DataFrame, length: int, multiplier: float) -> pd.Ser
 
 
 def _ichimoku_spans(df: pd.DataFrame, tenkan: int, kijun: int, senkou_b: int):
+    """Shifted cloud spans — cloud top/bottom as displayed on TradingView chart."""
     high, low = df["High"], df["Low"]
     t = (high.rolling(tenkan).max() + low.rolling(tenkan).min()) / 2
     k = (high.rolling(kijun).max()  + low.rolling(kijun).min())  / 2
@@ -87,6 +92,18 @@ def _ichimoku_spans(df: pd.DataFrame, tenkan: int, kijun: int, senkou_b: int):
     return cloud_top, cloud_bot
 
 
+def _ichimoku_unshifted(df: pd.DataFrame, tenkan: int, kijun: int, senkou_b: int):
+    """Unshifted leading spans — matches Pine Script's leadingSpanA / leadingSpanB
+    without the displacement offset (i.e. what ta.supertrend compares against at
+    bar[0] before the chart shifts them 26 bars into the future)."""
+    high, low = df["High"], df["Low"]
+    t = (high.rolling(tenkan).max() + low.rolling(tenkan).min()) / 2   # conversion line
+    k = (high.rolling(kijun).max()  + low.rolling(kijun).min())  / 2   # base line
+    span_a = (t + k) / 2                                                # no shift
+    span_b = (high.rolling(senkou_b).max() + low.rolling(senkou_b).min()) / 2  # no shift
+    return span_a, span_b
+
+
 def _indicator_series(df: pd.DataFrame, indicator: str, params: dict) -> pd.Series | None:
     try:
         if indicator == "SuperTrend":
@@ -95,6 +112,10 @@ def _indicator_series(df: pd.DataFrame, indicator: str, params: dict) -> pd.Seri
         if indicator in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom"):
             top, bot = _ichimoku_spans(df, int(params["tenkan"]), int(params["kijun"]), int(params["senkou_b"]))
             return top if indicator == "Ichimoku Cloud Top" else bot
+
+        if indicator in ("Ichimoku Span A", "Ichimoku Span B"):
+            span_a, span_b = _ichimoku_unshifted(df, int(params["tenkan"]), int(params["kijun"]), int(params["senkou_b"]))
+            return span_a if indicator == "Ichimoku Span A" else span_b
 
         if indicator == "EMA":
             return df[params["source"]].ewm(span=int(params["period"]), adjust=False).mean()
@@ -212,8 +233,8 @@ def _cond_label(cond: dict) -> str:
     p = cond["params"]
     ind = cond["indicator"]
     if ind == "SuperTrend":
-        ind_str = f"SuperTrend({p.get('length')}, {p.get('multiplier')})"
-    elif ind in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom"):
+        ind_str = f"SuperTrend({p.get('multiplier')}, {p.get('length')})"   # (factor, atrLen) — Pine Script order
+    elif ind in ("Ichimoku Cloud Top", "Ichimoku Cloud Bottom", "Ichimoku Span A", "Ichimoku Span B"):
         ind_str = f"{ind}({p.get('tenkan')}, {p.get('kijun')}, {p.get('senkou_b')})"
     elif ind in ("EMA", "SMA"):
         ind_str = f"{ind}({p.get('source')}, {p.get('period')})"
