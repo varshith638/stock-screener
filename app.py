@@ -165,6 +165,11 @@ to_delete  = None
 for idx, cond in enumerate(conditions):
     cid = cond["id"]
 
+    # Guard against stale session state holding values that no longer exist in lists
+    if cond["field"]     not in FIELDS:      cond["field"]     = FIELDS[0]
+    if cond["operator"]  not in OPERATORS:   cond["operator"]  = OPERATORS[0]
+    if cond["indicator"] not in INDICATORS:  cond["indicator"] = INDICATORS[0]
+
     # Ensure widget state is seeded for this condition
     _init_widget_state(cid, cond["indicator"], cond["params"])
 
