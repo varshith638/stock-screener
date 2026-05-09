@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 import streamlit as st
 import pandas as pd
 from screener import (
@@ -9,6 +10,26 @@ from screener import (
 from sms import send_sms
 
 st.set_page_config(page_title="Stock Screener", page_icon="📈", layout="wide")
+
+# ── Presets ───────────────────────────────────────────────────────────────────
+PRESETS: dict[str, list[dict]] = {
+    "Strong Bull (TV Standard)": [
+        {"field": "Close",  "operator": "Greater than", "indicator": "SuperTrend",
+         "params": {"length": 12, "multiplier": 3.0}},
+        {"field": "Close",  "operator": "Greater than", "indicator": "SuperTrend",
+         "params": {"length": 10, "multiplier": 1.0}},
+        {"field": "Close",  "operator": "Greater than", "indicator": "SuperTrend",
+         "params": {"length": 11, "multiplier": 2.0}},
+        {"field": "Close",  "operator": "Greater than", "indicator": "Ichimoku Cloud Top",
+         "params": {"tenkan": 9, "kijun": 26, "senkou_b": 52}},
+        {"field": "Close",  "operator": "Greater than", "indicator": "Ichimoku Cloud Top",
+         "params": {"tenkan": 9, "kijun": 26, "senkou_b": 52}},
+        {"field": "Close",  "operator": "Greater than", "indicator": "EMA",
+         "params": {"source": "Close", "period": 200}},
+        {"field": "Volume", "operator": "Greater than", "indicator": "Number",
+         "params": {"value": 20.0}},
+    ],
+}
 
 # ── Session state init ────────────────────────────────────────────────────────
 if "conditions" not in st.session_state:
@@ -86,6 +107,33 @@ with st.sidebar:
 # ── Condition builder ─────────────────────────────────────────────────────────
 st.title("Condition Builder")
 st.caption("Stock must pass **all** conditions below (AND logic).")
+
+# Preset loader
+_preset_col, _preset_btn_col = st.columns([3, 1])
+_preset_choice = _preset_col.selectbox(
+    "Load a preset", ["— choose a preset —"] + list(PRESETS.keys()),
+    key="preset_select", label_visibility="collapsed",
+)
+if _preset_btn_col.button("Load preset", use_container_width=True):
+    if _preset_choice != "— choose a preset —":
+        new_conds = []
+        for raw in PRESETS[_preset_choice]:
+            cid = str(uuid.uuid4())[:8]
+            c = {"id": cid, **raw, "params": dict(raw["params"])}
+            _init_widget_state(cid, c["indicator"], c["params"])
+            new_conds.append(c)
+        st.session_state.conditions = new_conds
+        st.session_state["_preset_loaded"] = _preset_choice
+        st.rerun()
+
+# Show post-load notice (rendered on the rerun that follows)
+if st.session_state.pop("_preset_loaded", None) == "Strong Bull (TV Standard)":
+    st.info(
+        "⚠️ **Note on Volume > 20:** yfinance reports volume in actual shares "
+        "(S&P 500 stocks typically trade millions of shares daily), so this "
+        "condition will always pass. To filter low-volume stocks use a value "
+        "like **500000** (500 k shares) instead."
+    )
 
 conditions = st.session_state.conditions
 to_delete  = None
